@@ -1,5 +1,7 @@
 #include "s5p.h"
 
+#include <boost/date_time/posix_time/posix_time.hpp>
+
 #include <cstdlib>
 #include <string>
 #include <memory>
@@ -79,7 +81,7 @@ void Session::check_in_deadline()
             return;
         }
 
-        if(in_deadline_.expires_at() <= boost::posix_time::second_clock::local_time())
+        if(in_deadline_.expires_at() <= boost::posix_time::second_clock::universal_time())
         {
             std::ostringstream what; what << "in deadline";
             write_log(0, 1, verbose_, session_id_, what.str());
@@ -115,7 +117,7 @@ void Session::check_out_deadline()
             return;
         }
 
-        if(out_deadline_.expires_at() <= boost::posix_time::second_clock::local_time())
+        if(out_deadline_.expires_at() <= boost::posix_time::second_clock::universal_time())
         {
             std::ostringstream what; what << "out deadline";
             write_log(0, 1, verbose_, session_id_, what.str());
