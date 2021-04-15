@@ -23,7 +23,7 @@ Session::Session(boost::asio::io_service& ioc, tcp::socket in_socket, unsigned s
         out_socket_(ioc),
         out_deadline_(ioc),
         resolver(ioc),
-        deadlineSecond_(20),
+        deadlineSecond_(8),
         buffer_size_(buffer_size),
         in_buf_(buffer_size),
         out_buf_(buffer_size),
@@ -963,7 +963,7 @@ Server::Server(boost::asio::io_service& ioc, short port, unsigned buffer_size, s
     //acceptor_.listen(boost::asio::socket_base::max_listen_connections);
     acceptor_.listen(0x7fffffff);
 
-    for(int i=0;i<10;++i)
+    for(int i=0;i<1024;++i)
     {
         do_accept();
     }
