@@ -963,7 +963,7 @@ Server::Server(boost::asio::io_service& ioc, short port, unsigned buffer_size, s
     //acceptor_.listen(boost::asio::socket_base::max_listen_connections);
     acceptor_.listen(0x7fffffff);
 
-    for(int i=0;i<1024;++i)
+    for(int i=0;i<10;++i)
     {
         do_accept();
     }
