@@ -42,6 +42,10 @@ message(STATUS "CMAKE_BUILD_TYPE                  =${CMAKE_BUILD_TYPE}")
 
 #############Boost
 find_package(Boost COMPONENTS locale program_options system)
+
+message(STATUS "Boost_INCLUDE_DIRS                      =${Boost_INCLUDE_DIRS}")
+message(STATUS "Boost_LIBRARIES                         =${Boost_LIBRARIES}")
+
 if(${Boost_FOUND})
     set(INCLUDES ${INCLUDES} ${Boost_INCLUDE_DIRS})
     set(LINKLIBRARIES ${LINKLIBRARIES} ${Boost_LIBRARIES})
@@ -51,8 +55,14 @@ message(STATUS "INCLUDES                          =${INCLUDES}")
 message(STATUS "LINKLIBRARIES                     =${LINKLIBRARIES}")
 
 add_executable(${PROJECT_NAME}
-    s5p.h
-    s5p.cpp
+    server.h
+    server.cpp
+    log.h
+    encode.h
+    session_local_proxy.h
+    session_local_proxy.cpp
+    session_remote_proxy.h
+    session_remote_proxy.cpp
     main.cpp)
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${INCLUDES})
