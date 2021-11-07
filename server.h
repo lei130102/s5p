@@ -9,8 +9,9 @@ class server
 {
 public:
     server(
-            boost::asio::io_service& ioc
+            boost::asio::io_service& ioc_log
             , boost::asio::strand<boost::asio::io_service::executor_type>& strand_log
+            , boost::asio::io_service& ioc
             , short port
             , std::string remote_inpv4
             , short remote_port
@@ -22,11 +23,12 @@ public:
 private:
     void do_accept();
 
-    void handler_accept_completed(boost::system::error_code ec, std::shared_ptr<boost::asio::ip::tcp::socket> socket_inside);
+    void handler_accept_completed(boost::system::error_code ec, std::shared_ptr<boost::asio::ip::tcp::socket> socket);
+
+    boost::asio::io_service& ioc_log_;
+    boost::asio::strand<boost::asio::io_service::executor_type>& strand_log_;
 
     boost::asio::io_service& ioc_;
-
-    boost::asio::strand<boost::asio::io_service::executor_type>& strand_log_;
 
     boost::asio::ip::tcp::acceptor acceptor_inside_;
 

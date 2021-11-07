@@ -9,7 +9,7 @@ void encode(TInIterator begin, TInIterator end, TOutIterator out)
 {
     while(begin != end)
     {
-        *out = *begin ^ 108;
+        *out++ = *begin++ ^ 108;
     }
 }
 
@@ -18,7 +18,7 @@ void decode(TInIterator begin, TInIterator end, TOutIterator out)
 {
     while(begin != end)
     {
-        *out = *begin ^ 108;
+        *out++ = *begin++ ^ 108;
     }
 }
 

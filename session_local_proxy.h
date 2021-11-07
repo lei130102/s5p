@@ -25,9 +25,10 @@ class session_local_proxy : public std::enable_shared_from_this<session_local_pr
 {
 public:
     static std::shared_ptr<session_local_proxy> create(
-            boost::asio::io_service& ioc
+            boost::asio::io_service& ioc_log
             , boost::asio::strand<boost::asio::io_service::executor_type>& strand_log
-            , std::shared_ptr<boost::asio::ip::tcp::socket> socket_inside
+            , boost::asio::io_service& ioc
+            , std::shared_ptr<boost::asio::ip::tcp::socket> socket
             , unsigned session_id
             , std::string const& remote_proxy_host
             , short remote_proxy_port
@@ -40,9 +41,10 @@ public:
 
 private:
     session_local_proxy(
-            boost::asio::io_service& ioc
+            boost::asio::io_service& ioc_log
             , boost::asio::strand<boost::asio::io_service::executor_type>& strand_log
-            , std::shared_ptr<boost::asio::ip::tcp::socket> socket_inside
+            , boost::asio::io_service& ioc
+            , std::shared_ptr<boost::asio::ip::tcp::socket> socket
             , unsigned session_id
             , std::string const& remote_proxy_host
             , short remote_proxy_port
@@ -118,7 +120,8 @@ private:
             );
 
     void handler_write_remote_proxy_request_completed(
-                boost::system::error_code error
+                std::shared_ptr<std::vector<char>> buf
+                , boost::system::error_code error
                 , std::size_t bytes_transferred
             );
 
@@ -189,9 +192,10 @@ private:
             );
 
 private:
-    boost::asio::io_service& ioc_;
-
+    boost::asio::io_service& ioc_log_;
     boost::asio::strand<boost::asio::io_service::executor_type>& strand_log_;
+
+    boost::asio::io_service& ioc_;
 
     boost::asio::strand<boost::asio::io_service::executor_type> strand_;
     boost::asio::strand<boost::asio::io_service::executor_type> strand_inside_read_;

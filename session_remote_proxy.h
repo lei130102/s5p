@@ -22,9 +22,10 @@ class session_remote_proxy : public std::enable_shared_from_this<session_remote_
 {
 public:
     static std::shared_ptr<session_remote_proxy> create(
-            boost::asio::io_service& ioc
+            boost::asio::io_service& ioc_log
             , boost::asio::strand<boost::asio::io_service::executor_type>& strand_log
-            , std::shared_ptr<boost::asio::ip::tcp::socket> socket_inside
+            , boost::asio::io_service& ioc
+            , std::shared_ptr<boost::asio::ip::tcp::socket> socket
             , unsigned session_id
             , short verbose
             );
@@ -35,9 +36,10 @@ public:
 
 private:
     session_remote_proxy(
-            boost::asio::io_service& ioc
+            boost::asio::io_service& ioc_log
             , boost::asio::strand<boost::asio::io_service::executor_type>& strand_log
-            , std::shared_ptr<boost::asio::ip::tcp::socket> socket_inside
+            , boost::asio::io_service& ioc
+            , std::shared_ptr<boost::asio::ip::tcp::socket> socket
             , unsigned session_id
             , short verbose
             );
@@ -70,11 +72,12 @@ private:
 
     void handler_do_resolve_completed(
             boost::system::error_code error
-            , boost::asio::ip::tcp::resolver::iterator iter
+            , boost::asio::ip::tcp::resolver::results_type results
             );
 
     void do_connect(
-            boost::asio::ip::tcp::resolver::iterator& it);
+            boost::asio::ip::tcp::resolver::results_type results
+            );
 
     void handler_do_connect_completed(
             boost::system::error_code error
@@ -83,7 +86,8 @@ private:
     void write_response();
 
     void handler_write_response_completed(
-            boost::system::error_code error
+            std::shared_ptr<std::vector<char>> buf
+            , boost::system::error_code error
             , std::size_t bytes_transferred
             );
 
@@ -124,9 +128,10 @@ private:
             );
 
 private:
-    boost::asio::io_service& ioc_;
-
+    boost::asio::io_service& ioc_log_;
     boost::asio::strand<boost::asio::io_service::executor_type>& strand_log_;
+
+    boost::asio::io_service& ioc_;
 
     boost::asio::strand<boost::asio::io_service::executor_type> strand_;
     boost::asio::strand<boost::asio::io_service::executor_type> strand_inside_read_;
