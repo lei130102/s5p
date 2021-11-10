@@ -7,6 +7,8 @@
 #include <boost/asio/ip/tcp.hpp>
 
 #include <memory>
+#include <thread>
+#include <mutex>
 
 //remote proxy:
 //通过in_socket套接字read_request_protocol();  (接收后解密sock5请求)   对应write_remote_proxy_request
@@ -26,6 +28,7 @@ public:
             , boost::asio::strand<boost::asio::io_service::executor_type>& strand_log
             , boost::asio::io_service& ioc
             , std::shared_ptr<boost::asio::ip::tcp::socket> socket
+            , short remote_proxy_port
             , unsigned session_id
             , short verbose
             );
@@ -40,6 +43,7 @@ private:
             , boost::asio::strand<boost::asio::io_service::executor_type>& strand_log
             , boost::asio::io_service& ioc
             , std::shared_ptr<boost::asio::ip::tcp::socket> socket
+            , short remote_proxy_port
             , unsigned session_id
             , short verbose
             );
@@ -47,8 +51,7 @@ private:
     void deadline_wallside_overtime(
             boost::system::error_code error
             );
-
-    void deadline_inside_wallside_read_overtime(
+    void deadline_inside_wallside_overtime(
             boost::system::error_code error
             );
 
@@ -80,7 +83,8 @@ private:
             );
 
     void handler_do_connect_completed(
-            boost::system::error_code error
+            std::shared_ptr<boost::asio::ip::tcp::socket> socket
+            , boost::system::error_code error
             );
 
     void write_response();
@@ -145,8 +149,10 @@ private:
     std::shared_ptr<boost::asio::ip::tcp::socket> socket_wallside_;
 
     boost::asio::deadline_timer dealline_establish_;
-    boost::asio::deadline_timer deadline_inside_read_;
-    boost::asio::deadline_timer deadline_wallside_read_;
+    boost::asio::deadline_timer deadline_inside_wallside_;
+
+    //远程代理端口
+    short remote_proxy_port_;
 
     //请求的地址
     char remote_host_atyp_;
@@ -156,9 +162,11 @@ private:
     short verbose_;
 
     int dealline_establish_second_;
-    int deadline_read_second_;
+    int deadline_inside_wallside_second_;
 
     int session_id_;
+
+    std::recursive_mutex inside_wallside_mutex;
 };
 
 #endif // SESSION_REMOTE_PROXY_H

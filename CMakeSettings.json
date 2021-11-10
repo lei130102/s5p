@@ -12,6 +12,11 @@
       "ctestCommandArgs": "",
       "variables": [
         {
+          "name": "CMAKE_TOOLCHAIN_FILE",
+          "value": "D:\\OtherDocuments\\vcpkg\\vcpkg\\scripts\\buildsystems\\vcpkg.cmake",
+          "type": "STRING"
+        },
+        {
           "name": "VCPKG_TARGET_TRIPLET",
           "value": "x64-windows",
           "type": "STRING"
@@ -30,6 +35,11 @@
       "ctestCommandArgs": "",
       "inheritEnvironments": [ "msvc_x64_x64" ],
       "variables": [
+        {
+          "name": "CMAKE_TOOLCHAIN_FILE",
+          "value": "D:\\OtherDocuments\\vcpkg\\vcpkg\\scripts\\buildsystems\\vcpkg.cmake",
+          "type": "STRING"
+        },
         {
           "name": "VCPKG_TARGET_TRIPLET",
           "value": "x64-windows",

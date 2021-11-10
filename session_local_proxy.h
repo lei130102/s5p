@@ -7,6 +7,8 @@
 #include <boost/asio/ip/tcp.hpp>
 
 #include <memory>
+#include <thread>
+#include <mutex>
 
 //通过in_socket套接字read_handshake
 //通过in_socket套接字write_handshake
@@ -32,6 +34,7 @@ public:
             , unsigned session_id
             , std::string const& remote_proxy_host
             , short remote_proxy_port
+            , short local_proxy_port
             , short verbose
             );
 
@@ -48,6 +51,7 @@ private:
             , unsigned session_id
             , std::string const& remote_proxy_host
             , short remote_proxy_port
+            , short local_proxy_port
             , short verbose
             );
 
@@ -60,7 +64,7 @@ private:
     void deadline_inside_request_overtime(
         boost::system::error_code error
         );
-    void deadline_inside_wallside_read_overtime(
+    void deadline_inside_wallside_overtime(
         boost::system::error_code error
         );
 
@@ -81,27 +85,29 @@ private:
     void write_handshake();
 
     void handler_write_handshake_completed(
-            boost::system::error_code error
+            std::shared_ptr<std::array<char, 2>> buf
+            , boost::system::error_code error
             , std::size_t bytes_transferred
             );
 
     void write_refuse_handshake();
 
     void handler_write_refuse_handshake_completed(
-            boost::system::error_code error
+            std::shared_ptr<std::array<char, 2>>
+            , boost::system::error_code error
             , std::size_t bytes_transferred
             );
 
     void read_request();
 
     std::size_t completion_condition_read_request(
-            std::shared_ptr<std::vector<char>> buf
+            std::shared_ptr<std::array<char, 1024>> buf
             , boost::system::error_code error
             , std::size_t bytes_transferred
             );
 
     void handler_read_request_completed(
-            std::shared_ptr<std::vector<char>> buf
+            std::shared_ptr<std::array<char, 1024>> buf
             , boost::system::error_code error
             , std::size_t bytes_transferred
             );
@@ -128,13 +134,13 @@ private:
     void read_remote_proxy_response();
 
     std::size_t completion_condition_read_remote_proxy_response(
-            std::shared_ptr<std::vector<char>> buf
+            std::shared_ptr<std::array<char, 1024>> buf
             , boost::system::error_code const& error
             , std::size_t bytes_transferred
             );
 
     void handler_read_remote_proxy_response_completed(
-            std::shared_ptr<std::vector<char>> buf
+            std::shared_ptr<std::array<char, 1024>> buf
             , boost::system::error_code const& error
             , std::size_t bytes_transferred
             );
@@ -144,14 +150,16 @@ private:
             );
 
     void handler_write_response_from_remote_proxy_completed(
-            boost::system::error_code error
+            std::shared_ptr<std::vector<char>> buf
+            , boost::system::error_code error
             , std::size_t bytes_transferred
             );
 
     void write_response();
 
     void handler_write_response_completed(
-            boost::system::error_code error
+            std::shared_ptr<std::vector<char>> buf
+            , boost::system::error_code error
             , std::size_t bytes_transferred
             );
 
@@ -209,12 +217,14 @@ private:
     boost::asio::deadline_timer dealline_establish_;
     boost::asio::deadline_timer deadline_inside_handshake_;
     boost::asio::deadline_timer deadline_inside_request_;
-    boost::asio::deadline_timer deadline_inside_read_;
-    boost::asio::deadline_timer deadline_wallside_read_;
+    boost::asio::deadline_timer deadline_inside_wallside_;
 
     //远方代理的地址
     std::string remote_proxy_host_;
     short remote_proxy_port_;
+
+    //本地代理的端口
+    short local_proxy_port_;
 
     //请求的地址
     char remote_host_atyp_;
@@ -225,9 +235,11 @@ private:
 
     int deadline_second_;//达成过程单阶段超时时间
     int dealline_establish_second_;//达成的超时时间，注意要比达成过程单阶段超时时间长
-    int deadline_read_second_;//达成后，等待读的超时时间
+    int deadline_inside_wallside_second_;//达成后，等待读写的超时时间
 
     int session_id_;
+
+    std::recursive_mutex inside_wallside_mutex_;
 };
 
 #endif // SESSION_LOCAL_PROXY_H

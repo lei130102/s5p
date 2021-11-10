@@ -36,6 +36,9 @@ private:
     short verbose_;
     std::string remote_ipv4_;
     short remote_port_;
+
+    //本地代理的端口
+    short local_port_;
 };
 
 #endif // SERVER_H

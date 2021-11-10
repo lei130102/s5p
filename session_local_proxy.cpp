@@ -6,6 +6,8 @@
 #include <boost/asio.hpp>
 #include <boost/bind.hpp>
 
+#include<iomanip>  
+
 std::shared_ptr<session_local_proxy> session_local_proxy::create(
         boost::asio::io_service& ioc_log
         , boost::asio::strand<boost::asio::io_service::executor_type>& strand_log
@@ -14,6 +16,7 @@ std::shared_ptr<session_local_proxy> session_local_proxy::create(
         , unsigned session_id
         , std::string const& remote_proxy_host
         , short remote_proxy_port
+        , short local_proxy_port
         , short verbose
         )
 {
@@ -25,6 +28,7 @@ std::shared_ptr<session_local_proxy> session_local_proxy::create(
                                                     , session_id
                                                     , remote_proxy_host
                                                     , remote_proxy_port
+                                                    , local_proxy_port
                                                     , verbose
                                                     ));
 }
@@ -37,6 +41,7 @@ session_local_proxy::session_local_proxy(
         , unsigned session_id
         , std::string const& remote_proxy_host
         , short remote_proxy_port
+        , short local_proxy_port
         , short verbose
         )
     :ioc_log_(ioc_log)
@@ -46,60 +51,61 @@ session_local_proxy::session_local_proxy(
     , dealline_establish_(ioc)
     , deadline_inside_handshake_(ioc)
     , deadline_inside_request_(ioc)
-    , deadline_inside_read_(ioc)
-    , deadline_wallside_read_(ioc)
+    , deadline_inside_wallside_(ioc)
     , socket_wallside_(new boost::asio::ip::tcp::socket(ioc))
     , session_id_(session_id)
     , remote_proxy_host_(remote_proxy_host)
     , remote_proxy_port_(remote_proxy_port)
+    , local_proxy_port_(local_proxy_port)
     , remote_host_atyp_('\0')
     , verbose_(verbose)
-    , deadline_second_(5)
-    , dealline_establish_second_(8)
-    , deadline_read_second_(600)
+    , deadline_second_(10)
+    , dealline_establish_second_(12)
+    , deadline_inside_wallside_second_(20)
     , strand_(boost::asio::make_strand(ioc))
     , strand_inside_read_(boost::asio::make_strand(ioc))
     , strand_inside_write_(boost::asio::make_strand(ioc))
     , strand_wallside_read_(boost::asio::make_strand(ioc))
     , strand_wallside_write_(boost::asio::make_strand(ioc))
 {
-    boost::asio::dispatch(
-                ioc_log_
-                , boost::asio::bind_executor(strand_log_
-                                             , [=](){
-        std::ostringstream what;
-        what << "session " << session_id_ << " created";
-        write_log(log_level_info, verbose_, session_id_, what.str());
-    }
-                                             ));
+    write_log(ioc_log_, strand_log_, log_level_info, verbose_, session_id_, "created");
 }
 
 session_local_proxy::~session_local_proxy()
 {
-    boost::asio::dispatch(
-                ioc_log_
-                , boost::asio::bind_executor(strand_log_
-                                             , [=](){
-        std::ostringstream what;
-        what << "session " << session_id_ << " destroyed";
-        write_log(log_level_info, verbose_, session_id_, what.str());
-    }
-                                             ));
+    write_log(ioc_log_, strand_log_, log_level_info, verbose_, session_id_, "destroying");
 
     if(socket_inside_->is_open())
     {
-        socket_inside_->close();
+        boost::system::error_code ec;
+        socket_inside_->shutdown(boost::asio::socket_base::shutdown_both, ec);
+        //注意，多个线程对同一个socket进行操作时，如果执行close那么有可能抛出异常
+        try
+        {
+            socket_inside_->close();
+        }
+        catch(boost::system::error_code& ec)
+        {}
     }
     if(socket_wallside_->is_open())
     {
-        socket_wallside_->close();
+        boost::system::error_code ec;
+        socket_wallside_->shutdown(boost::asio::socket_base::shutdown_both, ec);
+        //注意，多个线程对同一个socket进行操作时，如果执行close那么有可能抛出异常
+        try
+        {
+            socket_wallside_->close();
+        }
+        catch(boost::system::error_code& ec)
+        {}
     }
 
-    dealline_establish_.cancel();
-    deadline_inside_handshake_.cancel();
-    deadline_inside_request_.cancel();
-    deadline_inside_read_.cancel();
-    deadline_wallside_read_.cancel();
+	dealline_establish_.cancel();
+	deadline_inside_handshake_.cancel();
+	deadline_inside_request_.cancel();
+    deadline_inside_wallside_.cancel();
+
+    write_log(ioc_log_, strand_log_, log_level_info, verbose_, session_id_, "destroyed");
 }
 
 void session_local_proxy::deadline_inside_overtime(
@@ -111,24 +117,11 @@ void session_local_proxy::deadline_inside_overtime(
         return;
     }
 
-    boost::asio::dispatch(
-                ioc_log_
-                , boost::asio::bind_executor(strand_log_
-                                             , [=](){
-        std::ostringstream what;
-        what << " deadline_inside_overtime ";
-        write_log(log_level_info, verbose_, session_id_, what.str());
-    }
-                                             ));
+    write_log(ioc_log_, strand_log_, log_level_info, verbose_, session_id_, "deadline_inside_overtime");
 
-    if(socket_inside_->is_open())
-    {
-        socket_inside_->close();
-    }
-    if(socket_wallside_->is_open())
-    {
-        socket_wallside_->close();
-    }
+    boost::system::error_code ec;
+    socket_inside_->shutdown(boost::asio::socket_base::shutdown_both, ec);
+    socket_wallside_->shutdown(boost::asio::socket_base::shutdown_both, ec);
 }
 
 void session_local_proxy::deadline_inside_handshake_overtime(
@@ -142,15 +135,7 @@ void session_local_proxy::deadline_inside_handshake_overtime(
 
     dealline_establish_.cancel();//只需要有一个定时器超时就行
 
-    boost::asio::dispatch(
-                ioc_log_
-                , boost::asio::bind_executor(strand_log_
-                                             , [=](){
-        std::ostringstream what;
-        what << " deadline_inside_handshake_overtime ";
-        write_log(log_level_info, verbose_, session_id_, what.str());
-    }
-                                             ));
+    write_log(ioc_log_, strand_log_, log_level_info, verbose_, session_id_, "deadline_inside_handshake_overtime");
 
     write_refuse_handshake();
 }
@@ -166,20 +151,12 @@ void session_local_proxy::deadline_inside_request_overtime(
 
     dealline_establish_.cancel();//只需要有一个定时器超时就行
 
-    boost::asio::dispatch(
-                ioc_log_
-                , boost::asio::bind_executor(strand_log_
-                                             , [=](){
-        std::ostringstream what;
-        what << " deadline_inside_request_overtime ";
-        write_log(log_level_info, verbose_, session_id_, what.str());
-    }
-                                             ));
+    write_log(ioc_log_, strand_log_, log_level_info, verbose_, session_id_, "deadline_inside_request_overtime");
 
     write_response();
 }
 
-void session_local_proxy::deadline_inside_wallside_read_overtime(
+void session_local_proxy::deadline_inside_wallside_overtime(
         boost::system::error_code error
         )
 {
@@ -188,24 +165,13 @@ void session_local_proxy::deadline_inside_wallside_read_overtime(
         return;
     }
 
-    boost::asio::dispatch(
-                ioc_log_
-                , boost::asio::bind_executor(strand_log_
-                                             , [=](){
-        std::ostringstream what;
-        what << " deadline_inside_wallside_read_overtime ";
-        write_log(log_level_info, verbose_, session_id_, what.str());
-    }
-                                             ));
+    write_log(ioc_log_, strand_log_, log_level_info, verbose_, session_id_, "deadline_inside_wallside_overtime");
 
-    if(socket_inside_->is_open())
-    {
-        socket_inside_->close();
-    }
-    if(socket_wallside_->is_open())
-    {
-        socket_wallside_->close();
-    }
+    deadline_inside_wallside_.cancel();
+
+    boost::system::error_code ec;
+    socket_inside_->shutdown(boost::asio::socket_base::shutdown_both, ec);
+    socket_wallside_->shutdown(boost::asio::socket_base::shutdown_both, ec);
 }
 
 void session_local_proxy::start()
@@ -283,22 +249,13 @@ void session_local_proxy::handler_read_handshake_completed(
 {
     if(error)
     {
-        if(socket_inside_->is_open())
-        {
-            socket_inside_->close();
-        }
+        boost::system::error_code ec;
+        socket_inside_->shutdown(boost::asio::socket_base::shutdown_both, ec);
+
         return;
     }
 
-    boost::asio::dispatch(
-                ioc_log_
-                , boost::asio::bind_executor(strand_log_
-                                             , [=](){
-        std::ostringstream what;
-        what << "read handshake";
-        write_log(log_level_info, verbose_, session_id_, what.str());
-    }
-                                             ));
+    write_log(ioc_log_, strand_log_, log_level_info, verbose_, session_id_, "read handshake");
 
     //收到了客户端的握手，设定时器要求必须返回握手响应
     deadline_inside_handshake_.expires_from_now(boost::posix_time::seconds(deadline_second_));
@@ -320,33 +277,24 @@ void session_local_proxy::write_handshake()
     boost::asio::async_write(
                 *socket_inside_
                 , boost::asio::buffer(*buf, 2) // Always 2-byte according to RFC1928
-                , boost::asio::bind_executor(strand_, boost::bind(&session_local_proxy::handler_write_handshake_completed, shared_from_this(), boost::placeholders::_1, boost::placeholders::_2)));
+                , boost::asio::bind_executor(strand_, boost::bind(&session_local_proxy::handler_write_handshake_completed, shared_from_this(), buf//注意必须要传递他，以延长buf的生命周期，使boost::asio::buffer(*buf, 2)一直有效
+                    , boost::placeholders::_1, boost::placeholders::_2)));
 }
 
 void session_local_proxy::handler_write_handshake_completed(
-        boost::system::error_code error
+        std::shared_ptr<std::array<char, 2>> buf
+        , boost::system::error_code error
         , std::size_t bytes_transferred
         )
 {
     if(error)
     {
-        //write_log(1, 0, verbose_, session_id_, "[boost::asio::basic_stream_socket.async_write] No appropriate auth method found. Closing session.");
-        if(socket_inside_->is_open())
-        {
-            socket_inside_->close();
-        }
+        boost::system::error_code ec;
+        socket_inside_->shutdown(boost::asio::socket_base::shutdown_both, ec);
         return;
     }
 
-    boost::asio::dispatch(
-                ioc_log_
-                , boost::asio::bind_executor(strand_log_
-                                             , [=](){
-        std::ostringstream what;
-        what << "write handshake";
-        write_log(log_level_info, verbose_, session_id_, what.str());
-    }
-                                             ));
+    write_log(ioc_log_, strand_log_, log_level_info, verbose_, session_id_, "write handshake");
 
     deadline_inside_handshake_.cancel();
 
@@ -362,33 +310,24 @@ void session_local_proxy::write_refuse_handshake()
     boost::asio::async_write(
                 *socket_inside_
                 , boost::asio::buffer(*buf, 2) // Always 2-byte according to RFC1928
-                , boost::asio::bind_executor(strand_, boost::bind(&session_local_proxy::handler_write_refuse_handshake_completed, shared_from_this(), boost::placeholders::_1, boost::placeholders::_2)));
+                , boost::asio::bind_executor(strand_, boost::bind(&session_local_proxy::handler_write_refuse_handshake_completed, shared_from_this(), buf, boost::placeholders::_1, boost::placeholders::_2)));
 }
 
 void session_local_proxy::handler_write_refuse_handshake_completed(
-        boost::system::error_code error
+        std::shared_ptr<std::array<char, 2>>
+        , boost::system::error_code error
         , std::size_t bytes_transferred
         )
 {
-    boost::asio::dispatch(
-                ioc_log_
-                , boost::asio::bind_executor(strand_log_
-                                             , [=](){
-        std::ostringstream what;
-        what << "write refuse handshake";
-        write_log(log_level_info, verbose_, session_id_, what.str());
-    }
-                                             ));
+    write_log(ioc_log_, strand_log_, log_level_info, verbose_, session_id_, "write refuse handshake");
 
-    if(socket_inside_->is_open())
-    {
-        socket_inside_->close();
-    }
+    boost::system::error_code ec;
+    socket_inside_->shutdown(boost::asio::socket_base::shutdown_both, ec);
 }
 
 void session_local_proxy::read_request()
 {
-    std::shared_ptr<std::vector<char>> buf(new std::vector<char>(1024, 0));
+    std::shared_ptr<std::array<char, 1024>> buf(new std::array<char, 1024>{});
     boost::asio::async_read(
                     *socket_inside_
                     , boost::asio::buffer(*buf)
@@ -398,7 +337,7 @@ void session_local_proxy::read_request()
 }
 
 std::size_t session_local_proxy::completion_condition_read_request(
-        std::shared_ptr<std::vector<char>> buf
+        std::shared_ptr<std::array<char, 1024>> buf
         , boost::system::error_code error
         , std::size_t bytes_transferred)
 {
@@ -438,32 +377,37 @@ std::size_t session_local_proxy::completion_condition_read_request(
     {
         return 1;
     }
+    switch (buf->at(3))
+    {
+    case 0x01: // IP V4 addres
+        {
+            if(bytes_transferred < (4 + 4 + 2))
+            {
+                return 1;//再读1个字节
+            }
+        }
+        break;
+    case 0x03: // DOMAINNAME
+        {
+            if(bytes_transferred < 5)
+            {
+                return 1;//再读1个字节
+            }
 
-    if(buf->at(3) == 0x01)
-    {
-        if(bytes_transferred < (4 + 4 + 2))
-        {
-            return 1;
+            if(bytes_transferred < (4 + 1 + (std::size_t)(buf->at(4)) + 2))
+            {
+                return 1;//再读1个字节
+            }
         }
-    }
-    else if(buf->at(3) == 0x03)
-    {
-        if(bytes_transferred < 5)
+        break;
+    case 0x04: // IP V6 addres
         {
-            return 1;
+            if(bytes_transferred < (4 + 16 + 2))
+            {
+                return 1;
+            }
         }
-
-        if(bytes_transferred < (4 + 1 + buf->at(4) + 2))
-        {
-            return 1;
-        }
-    }
-    else if(buf->at(3) == 0x04)
-    {
-        if(bytes_transferred < (4 + 16 + 2))
-        {
-            return 1;
-        }
+        break;
     }
 
     //值检查
@@ -481,35 +425,29 @@ std::size_t session_local_proxy::completion_condition_read_request(
 }
 
 void session_local_proxy::handler_read_request_completed(
-        std::shared_ptr<std::vector<char>> buf
+        std::shared_ptr<std::array<char, 1024>> buf
         , boost::system::error_code error
         , std::size_t bytes_transferred)
 {
     if(error)
     {
-        if(socket_inside_->is_open())
-        {
-            socket_inside_->close();
-        }
+        boost::system::error_code ec;
+        socket_inside_->shutdown(boost::asio::socket_base::shutdown_both, ec);
         return;
     }
 
-    std::vector<char> buf_data(*buf);
-    boost::asio::dispatch(
-                    ioc_log_
-                    , boost::asio::bind_executor(strand_log_
-                                                 , [=](){
-            std::ostringstream what;
-            what << "request:";
-            for(int i = 0; i < bytes_transferred; ++i)
-            {
-                what << (int)(buf_data.at(i)) << " ";
-            }
-            write_log(log_level_info, verbose_, session_id_, what.str());
-        }
-                                                 ));
+    std::shared_ptr<std::vector<char>> buf_read(new std::vector<char>(buf->begin(), buf->begin() + bytes_transferred));
 
-    buf->resize(bytes_transferred);
+//    {
+//		std::stringstream ss;
+//        ss << "local_proxy_request:";
+//        for (auto element : *buf_read)
+//        {
+//            ss << std::hex << std::setw(2) << std::setfill('0') << (unsigned int)(*(unsigned char*)&element) << " ";
+//        }
+//        std::string what = ss.str();
+//	    write_log(ioc_log_, strand_log_, log_level_info, verbose_, session_id_, what);
+//    }
 
     //收到了客户端的请求，设定时器要求必须返回请求响应
     deadline_inside_request_.expires_from_now(boost::posix_time::seconds(deadline_second_));
@@ -517,57 +455,55 @@ void session_local_proxy::handler_read_request_completed(
                 boost::asio::bind_executor(strand_, boost::bind(&session_local_proxy::deadline_inside_request_overtime, shared_from_this(), boost::placeholders::_1))
                 );
 
-    remote_host_atyp_ = buf->at(3);
-    switch (buf->at(3))
+    do_remote_proxy_connect(buf_read);
+
+    remote_host_atyp_ = buf_read->at(3);
+
+    switch (buf_read->at(3))
     {
     case 0x01: // IP V4 addres
         {
 
-        std::copy(buf->begin() + 4, buf->begin() + 8, std::back_inserter(remote_host_bndaddr_));
+            std::copy(buf_read->begin() + 4, buf_read->begin() + 4 + 4, std::back_inserter(remote_host_bndaddr_));
+            std::copy(buf_read->begin() + 4 + 4, buf_read->begin() + 4 + 4 + 2, std::back_inserter(remote_port_bndport_));
 
-        std::copy(buf->begin() + 8, buf->begin() + 10, std::back_inserter(remote_port_bndport_));
-
-        do_remote_proxy_connect(buf);
+            do_remote_proxy_connect(buf_read);
 
         }
         break;
     case 0x03: // DOMAINNAME
         {
-        uint8_t host_length = buf->at(4);
-        std::copy(buf->begin() + 4, buf->begin() + 4 + 1 + host_length, std::back_inserter(remote_host_bndaddr_));
+            uint8_t host_length = buf_read->at(4);
 
-        std::copy(buf->begin() + 4 + 1 + host_length, buf->begin() + 4 + 1 + host_length + 2, std::back_inserter(remote_port_bndport_));
+            std::copy(buf_read->begin() + 4, buf_read->begin() + 4 + 1 + host_length, std::back_inserter(remote_host_bndaddr_));
+            std::copy(buf_read->begin() + 4 + 1 + host_length, buf_read->begin() + 4 + 1 + host_length + 2, std::back_inserter(remote_port_bndport_));
 
-        do_remote_proxy_connect(buf);
+            do_remote_proxy_connect(buf_read);
 
         }
         break;
-    }
+    case 0x04: // IP V6 addres
+        {
+            std::copy(buf_read->begin() + 4, buf_read->begin() + 4 + 16, std::back_inserter(remote_host_bndaddr_));
+            std::copy(buf_read->begin() + 4 + 16, buf_read->begin() + 4 + 16 + 2, std::back_inserter(remote_port_bndport_));
 
-    //default:
-        //write_log(1, 0, verbose_, session_id_, "unsupport_ed address type in SOCKS5 request. Closing session.");
-        //break;
+            do_remote_proxy_connect(buf_read);
+        }
+        break;
+    }
 }
 
 void session_local_proxy::do_remote_proxy_connect(
         std::shared_ptr<std::vector<char>> buf
         )
 {
-    boost::asio::dispatch(
-                ioc_log_
-                , boost::asio::bind_executor(strand_log_
-                                             , [=](){
-        std::ostringstream what;
-        what << "do_remote_proxy_connect remote_proxy_host_:" << remote_proxy_host_ << " remote_proxy_port_:" << remote_proxy_port_;
-        write_log(log_level_info, verbose_, session_id_, what.str());
-    }
-                                            ));
+    std::shared_ptr<std::vector<char>> buf_connect(new std::vector<char>(*buf));
 
     boost::asio::ip::tcp::endpoint ep(boost::asio::ip::address::from_string(remote_proxy_host_), remote_proxy_port_);
 
     socket_wallside_->async_connect(
                 ep
-                , boost::asio::bind_executor(strand_, boost::bind(&session_local_proxy::handler_remote_proxy_connect_completed, shared_from_this(), buf, boost::placeholders::_1)));
+                , boost::asio::bind_executor(strand_, boost::bind(&session_local_proxy::handler_remote_proxy_connect_completed, shared_from_this(), buf_connect, boost::placeholders::_1)));
 }
 
 void session_local_proxy::handler_remote_proxy_connect_completed(
@@ -580,17 +516,11 @@ void session_local_proxy::handler_remote_proxy_connect_completed(
         return;
     }
 
-    boost::asio::dispatch(
-                ioc_log_
-                , boost::asio::bind_executor(strand_log_
-                                             , [=](){
-        std::ostringstream what;
-        what << "remote proxy connected";
-        write_log(log_level_info, verbose_, session_id_, what.str());
-    }
-                                             ));
+    std::shared_ptr<std::vector<char>> buf_connect(new std::vector<char>(*buf));
 
-    write_remote_proxy_request(buf);
+    write_log(ioc_log_, strand_log_, log_level_info, verbose_, session_id_, "remote proxy connected");
+
+    write_remote_proxy_request(buf_connect);
 }
 
 void session_local_proxy::write_remote_proxy_request(
@@ -619,22 +549,12 @@ void session_local_proxy::handler_write_remote_proxy_request_completed(
         return;
     }
 
-    boost::asio::dispatch(
-                ioc_log_
-                , boost::asio::bind_executor(strand_log_
-                                             , [=](){
-        std::ostringstream what;
-        what << "write remote proxy request";
-        write_log(log_level_info, verbose_, session_id_, what.str());
-    }
-                                             ));
-
     read_remote_proxy_response();
 }
 
 void session_local_proxy::read_remote_proxy_response()
 {
-    std::shared_ptr<std::vector<char>> buf(new std::vector<char>(1024, 0));
+    std::shared_ptr<std::array<char, 1024>> buf(new std::array<char, 1024>{});
     boost::asio::async_read(
                     *socket_wallside_
                     , boost::asio::buffer(*buf)
@@ -644,28 +564,22 @@ void session_local_proxy::read_remote_proxy_response()
 }
 
 std::size_t session_local_proxy::completion_condition_read_remote_proxy_response(
-        std::shared_ptr<std::vector<char>> buf
+        std::shared_ptr<std::array<char, 1024>> buf
         , boost::system::error_code const& error
         , std::size_t bytes_transferred
         )
 {
     if(error)
     {
-        boost::asio::dispatch(
-                        ioc_log_
-                        , boost::asio::bind_executor(strand_log_
-                                                     , [=](){
-                std::ostringstream what;
-                what << "completion_condition_read_remote_proxy_response error:" << error.value() << " " << error.message();
-                write_log(log_level_info, verbose_, session_id_, what.str());
-            }
-                                                     ));
+		std::ostringstream what;
+		what << "completion_condition_read_remote_proxy_response error:" << error.value() << " " << error.message();
+        write_log(ioc_log_, strand_log_, log_level_info, verbose_, session_id_, what.str());
 
         return 0;
     }
 
-    std::shared_ptr<std::vector<char>> buf_decode(new std::vector<char>(buf->size()));
-    decode(buf->begin(), buf->end(), buf_decode->begin());
+    std::shared_ptr<std::vector<char>> buf_decode(new std::vector<char>(bytes_transferred));
+    decode(buf->begin(), buf->begin() + bytes_transferred, buf_decode->begin());
 
     //长度检查
     if(bytes_transferred < 4)
@@ -673,31 +587,37 @@ std::size_t session_local_proxy::completion_condition_read_remote_proxy_response
         return 1;
     }
 
-    if(buf_decode->at(3) == 0x01)
+    switch (buf_decode->at(3))
     {
-        if(bytes_transferred < (4 + 4 + 2))
+        case 0x01:
         {
-            return 1;
+            if(bytes_transferred < (4 + 4 + 2))
+            {
+                return 1;
+            }
         }
-    }
-    else if(buf_decode->at(3) == 0x03)
-    {
-        if(bytes_transferred < 5)
+        break;
+        case 0x03:
         {
-            return 1;
-        }
+            if(bytes_transferred < 5)
+            {
+                return 1;
+            }
 
-        if(bytes_transferred < (4 + 1 + buf_decode->at(4) + 2))
-        {
-            return 1;
+            if(bytes_transferred < (4 + 1 + (std::size_t)(buf_decode->at(4)) + 2))
+            {
+                return 1;
+            }
         }
-    }
-    else if(buf_decode->at(3) == 0x04)
-    {
-        if(bytes_transferred < (4 + 16 + 2))
+        break;
+        case 0x04:
         {
-            return 1;
+            if(bytes_transferred < (4 + 16 + 2))
+            {
+                return 1;
+            }
         }
+        break;
     }
 
     //值检查
@@ -715,7 +635,7 @@ std::size_t session_local_proxy::completion_condition_read_remote_proxy_response
 }
 
 void session_local_proxy::handler_read_remote_proxy_response_completed(
-        std::shared_ptr<std::vector<char>> buf
+        std::shared_ptr<std::array<char, 1024>> buf
         , boost::system::error_code const& error
         , std::size_t bytes_transferred
         )
@@ -725,38 +645,18 @@ void session_local_proxy::handler_read_remote_proxy_response_completed(
         return;
     }
 
-    std::vector<char> buf_data(*buf);
-    boost::asio::dispatch(
-                    ioc_log_
-                    , boost::asio::bind_executor(strand_log_
-                                                 , [=](){
-            std::ostringstream what;
-            what << "response encode(remote proxy):";
-            for(int i = 0; i < bytes_transferred; ++i)
-            {
-                what << (int)(buf_data.at(i)) << " ";
-            }
-            write_log(log_level_info, verbose_, session_id_, what.str());
-        }
-                                                 ));
-
     std::shared_ptr<std::vector<char>> buf_decode(new std::vector<char>(bytes_transferred));
     decode(buf->begin(), buf->begin() + bytes_transferred, buf_decode->begin());
 
-    std::vector<char> buf_decode_data(*buf_decode);
-    boost::asio::dispatch(
-                    ioc_log_
-                    , boost::asio::bind_executor(strand_log_
-                                                 , [=](){
-            std::ostringstream what;
-            what << "response(remote proxy):";
-            for(int i = 0; i < bytes_transferred; ++i)
-            {
-                what << (int)(buf_decode_data.at(i)) << " ";
-            }
-            write_log(log_level_info, verbose_, session_id_, what.str());
+    {
+		std::stringstream ss;
+        ss << "remote_proxy_response:";
+        for (auto element : *buf_decode)
+        {
+            ss << std::hex << std::setw(2) << std::setfill('0') << (unsigned int)(*(unsigned char*)&element) << " ";
         }
-                                                 ));
+	    write_log(ioc_log_, strand_log_, log_level_info, verbose_, session_id_, ss.str());
+    }
 
     write_response_from_remote_proxy(buf_decode);
 }
@@ -769,12 +669,13 @@ void session_local_proxy::write_response_from_remote_proxy(
                 *socket_inside_
                 , boost::asio::buffer(*buf)
                 , boost::asio::transfer_at_least(buf->size())
-                , boost::asio::bind_executor(strand_, boost::bind(&session_local_proxy::handler_write_response_from_remote_proxy_completed, shared_from_this(), boost::placeholders::_1, boost::placeholders::_2))
+                , boost::asio::bind_executor(strand_, boost::bind(&session_local_proxy::handler_write_response_from_remote_proxy_completed, shared_from_this(), buf, boost::placeholders::_1, boost::placeholders::_2))
                 );
 }
 
 void session_local_proxy::handler_write_response_from_remote_proxy_completed(
-        boost::system::error_code error
+        std::shared_ptr<std::vector<char>> buf
+        , boost::system::error_code error
         , std::size_t bytes_transferred
         )
 {
@@ -783,22 +684,11 @@ void session_local_proxy::handler_write_response_from_remote_proxy_completed(
         return;
     }
 
-    boost::asio::dispatch(
-                ioc_log_
-                , boost::asio::bind_executor(strand_log_
-                                             , [=](){
-        std::ostringstream what;
-        what << "write response (from remote proxy)";
-        write_log(log_level_info, verbose_, session_id_, what.str());
-    }
-                                             ));
+	write_log(ioc_log_, strand_log_, log_level_info, verbose_, session_id_, "write response (from remote proxy)");
 
     dealline_establish_.cancel();
 
     deadline_inside_request_.cancel();
-
-    //            std::ostringstream what; what << "write_socks5_response_from_remote_proxy";
-    //            write_log(0, 1, verbose_, session_id_, what.str());
 
     do_read_inside();
     do_read_wallside();
@@ -807,56 +697,72 @@ void session_local_proxy::handler_write_response_from_remote_proxy_completed(
 void session_local_proxy::write_response()
 {
     std::shared_ptr<std::vector<char>> buf(new std::vector<char>);
-    buf->push_back(0x05);
-    buf->push_back(0x03);//不管具体什么原因无法返回响应，都按照 0x03网络不可达 处理
-    buf->push_back(0x00);
-    buf->push_back(remote_host_atyp_);
-    if(remote_host_atyp_ == 0x03)
+//    {
+//        //返回本地代理的ip和端口
+//        boost::asio::ip::tcp::endpoint ep(boost::asio::ip::tcp::v4(), local_proxy_port_);
+
+//        buf->push_back(0x05);
+//        buf->push_back(0x03);//不管具体什么原因无法返回响应，都按照 0x03网络不可达 处理
+//        buf->push_back(0x00);
+//        buf->push_back(0x01);//本地代理的ip是ipv4
+//        auto ip = ep.address().to_v4().to_bytes();
+//        buf->insert(buf->end(), ip.begin(), ip.end());
+//        auto port = ep.port();
+//        buf->push_back(*((char*)(&port)));
+//        buf->push_back(*((char*)(&port) + 1));
+//    }
+
     {
-        buf->push_back(remote_host_bndaddr_.size());
+        //返回原来的ip和端口
+        buf->push_back(0x05);
+        buf->push_back(0x03);//不管具体什么原因无法返回响应，都按照 0x03网络不可达 处理
+        buf->push_back(0x00);
+        buf->push_back(remote_host_atyp_);
+
+        buf->insert(buf->end(), remote_host_bndaddr_.begin(), remote_host_bndaddr_.end());
+        buf->insert(buf->end(), remote_port_bndport_.begin(), remote_port_bndport_.end());
     }
-    std::copy(remote_host_bndaddr_.begin(), remote_host_bndaddr_.end(), std::back_inserter(*buf));
-    std::copy(remote_port_bndport_.begin(), remote_port_bndport_.end(), std::back_inserter(*buf));
+
+    char remote_host_atyp;
+    std::vector<char> remote_host_bndaddr;
+    std::vector<char> remote_port_bndport;
 
     boost::asio::async_write(
                 *socket_inside_
                 , boost::asio::buffer(*buf)
                 , boost::asio::transfer_at_least(buf->size())
-                , boost::asio::bind_executor(strand_, boost::bind(&session_local_proxy::handler_write_response_completed, shared_from_this(), boost::placeholders::_1, boost::placeholders::_2))
+                , boost::asio::bind_executor(strand_, boost::bind(&session_local_proxy::handler_write_response_completed, shared_from_this(), buf, boost::placeholders::_1, boost::placeholders::_2))
                 );
 }
 
 void session_local_proxy::handler_write_response_completed(
-        boost::system::error_code error
+        std::shared_ptr<std::vector<char>> buf
+        , boost::system::error_code error
         , std::size_t bytes_transferred
         )
 {
-    boost::asio::dispatch(
-                ioc_log_
-                , boost::asio::bind_executor(strand_log_
-                                             , [=](){
-        std::ostringstream what;
-        what << "write refuse response (from local proxy)";
-        write_log(log_level_info, verbose_, session_id_, what.str());
+    if (error)
+    {
+        return;
     }
-                                             ));
 
-    if(socket_inside_->is_open())
-    {
-        socket_inside_->close();
-    }
-    if(socket_wallside_->is_open())
-    {
-        socket_wallside_->close();
-    }
+	write_log(ioc_log_, strand_log_, log_level_info, verbose_, session_id_, "write refuse response (from local proxy)");
+
+    boost::system::error_code ec;
+    socket_inside_->shutdown(boost::asio::socket_base::shutdown_both, ec);
+    socket_wallside_->shutdown(boost::asio::socket_base::shutdown_both, ec);
 }
 
 void session_local_proxy::do_read_inside()
 {
-    deadline_inside_read_.expires_from_now(boost::posix_time::seconds(deadline_read_second_));
-    deadline_inside_read_.async_wait(
-                boost::asio::bind_executor(strand_, boost::bind(&session_local_proxy::deadline_inside_wallside_read_overtime, shared_from_this(), boost::placeholders::_1))
-                );
+    {
+        std::lock_guard<std::recursive_mutex> lg(inside_wallside_mutex_);
+
+        deadline_inside_wallside_.expires_from_now(boost::posix_time::seconds(deadline_inside_wallside_second_));
+        deadline_inside_wallside_.async_wait(
+                    boost::bind(&session_local_proxy::deadline_inside_wallside_overtime, shared_from_this(), boost::placeholders::_1)
+                    );
+    }
 
     std::shared_ptr<std::vector<char>> buf(new std::vector<char>(40960, 0));
     socket_inside_->async_read_some(
@@ -876,17 +782,9 @@ void session_local_proxy::handler_do_read_inside_completed(
         return;
     }
 
-    boost::asio::dispatch(
-                ioc_log_
-                , boost::asio::bind_executor(strand_log_
-                                             , [=](){
-        std::ostringstream what;
-        what << " --> " << std::to_string(bytes_transferred) << " bytes";
-        write_log(log_level_info, verbose_, session_id_, what.str());
-    }
-                                             ));
-
-    do_read_inside();
+	std::ostringstream what;
+	what << " --> " << std::to_string(bytes_transferred) << " bytes";
+	write_log(ioc_log_, strand_log_, log_level_info, verbose_, session_id_, what.str());
 
     auto buf_write = std::make_shared<std::vector<char>>(buf->begin(), buf->begin() + bytes_transferred);
 
@@ -894,15 +792,28 @@ void session_local_proxy::handler_do_read_inside_completed(
     encode(buf_write->begin(), buf_write->end(), buf_write_encode->begin());
 
     do_write_wallside(buf_write_encode);
+
+    do_read_inside();
 }
 
 void session_local_proxy::do_write_wallside(
         std::shared_ptr<std::vector<char>> buf
         )
 {
+    {
+        std::lock_guard<std::recursive_mutex> lg(inside_wallside_mutex_);
+
+        deadline_inside_wallside_.expires_from_now(boost::posix_time::seconds(deadline_inside_wallside_second_));
+        deadline_inside_wallside_.async_wait(
+                    boost::bind(&session_local_proxy::deadline_inside_wallside_overtime, shared_from_this(), boost::placeholders::_1)
+                    );
+    }
+
+    std::shared_ptr<std::vector<char>> buf_write(new std::vector<char>(*buf));
+
     socket_wallside_->async_write_some(
-                boost::asio::buffer(*buf)
-                , boost::asio::bind_executor(strand_wallside_write_, boost::bind(&session_local_proxy::handler_do_write_wallside_completed, shared_from_this(), buf, boost::placeholders::_1, boost::placeholders::_2))
+                boost::asio::buffer(*buf_write)
+                , boost::asio::bind_executor(strand_wallside_write_, boost::bind(&session_local_proxy::handler_do_write_wallside_completed, shared_from_this(), buf_write, boost::placeholders::_1, boost::placeholders::_2))
                 );
 }
 
@@ -914,7 +825,7 @@ void session_local_proxy::handler_do_write_wallside_completed(
 {
     if(error)
     {
-        socket_wallside_->close();
+        return;
     }
 
     if(bytes_transferred < buf->size())
@@ -926,10 +837,14 @@ void session_local_proxy::handler_do_write_wallside_completed(
 
 void session_local_proxy::do_read_wallside()
 {
-    deadline_wallside_read_.expires_from_now(boost::posix_time::seconds(deadline_read_second_));
-    deadline_wallside_read_.async_wait(
-                boost::asio::bind_executor(strand_, boost::bind(&session_local_proxy::deadline_inside_wallside_read_overtime, shared_from_this(), boost::placeholders::_1))
-                );
+    {
+        std::lock_guard<std::recursive_mutex> lg(inside_wallside_mutex_);
+
+        deadline_inside_wallside_.expires_from_now(boost::posix_time::seconds(deadline_inside_wallside_second_));
+        deadline_inside_wallside_.async_wait(
+                    boost::bind(&session_local_proxy::deadline_inside_wallside_overtime, shared_from_this(), boost::placeholders::_1)
+                    );
+    }
 
     std::shared_ptr<std::vector<char>> buf(new std::vector<char>(40960, 0));
     socket_wallside_->async_read_some(
@@ -949,17 +864,9 @@ void session_local_proxy::handler_do_read_wallside_completed(
         return;
     }
 
-    boost::asio::dispatch(
-                ioc_log_
-                , boost::asio::bind_executor(strand_log_
-                                             , [=](){
-        std::ostringstream what;
-        what << " <-- " << std::to_string(bytes_transferred) << " bytes";
-        write_log(log_level_info, verbose_, session_id_, what.str());
-    }
-                                             ));
-
-    do_read_wallside();
+	std::ostringstream what;
+	what << " <-- " << std::to_string(bytes_transferred) << " bytes";
+	write_log(ioc_log_, strand_log_, log_level_info, verbose_, session_id_, what.str());
 
     auto buf_write = std::make_shared<std::vector<char>>(buf->begin(), buf->begin() + bytes_transferred);
 
@@ -967,15 +874,28 @@ void session_local_proxy::handler_do_read_wallside_completed(
     decode(buf_write->begin(), buf_write->end(), buf_write_decode->begin());
 
     do_write_inside(buf_write_decode);
+
+    do_read_wallside();
 }
 
 void session_local_proxy::do_write_inside(
         std::shared_ptr<std::vector<char>> buf
         )
 {
+    {
+        std::lock_guard<std::recursive_mutex> lg(inside_wallside_mutex_);
+
+        deadline_inside_wallside_.expires_from_now(boost::posix_time::seconds(deadline_inside_wallside_second_));
+        deadline_inside_wallside_.async_wait(
+                    boost::bind(&session_local_proxy::deadline_inside_wallside_overtime, shared_from_this(), boost::placeholders::_1)
+                    );
+    }
+
+    std::shared_ptr<std::vector<char>> buf_write(new std::vector<char>(*buf));
+
     socket_inside_->async_write_some(
-                boost::asio::buffer(*buf)
-                , boost::asio::bind_executor(strand_inside_write_, boost::bind(&session_local_proxy::handler_do_write_inside_completed, shared_from_this(), buf, boost::placeholders::_1, boost::placeholders::_2))
+                boost::asio::buffer(*buf_write)
+                , boost::asio::bind_executor(strand_inside_write_, boost::bind(&session_local_proxy::handler_do_write_inside_completed, shared_from_this(), buf_write, boost::placeholders::_1, boost::placeholders::_2))
                 );
 }
 
@@ -987,11 +907,16 @@ void session_local_proxy::handler_do_write_inside_completed(
 {
     if(error)
     {
+        std::ostringstream what;
+        what << "handler_do_write_inside_completed error:" << error.value() << " " << error.message();
+        write_log(ioc_log_, strand_log_, log_level_info, verbose_, session_id_, what.str());
+
         return;
     }
 
     if(bytes_transferred < buf->size())
     {
+
         auto buf_write = std::make_shared<std::vector<char>>(buf->begin() + bytes_transferred, buf->end());
         do_write_inside(buf_write);
     }

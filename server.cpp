@@ -34,6 +34,7 @@ server::server(
     , verbose_(verbose)
     , remote_ipv4_(remote_ipv4)
     , remote_port_(remote_port)
+    , local_port_(port)
     , acceptor_inside_(ioc_)
 {
     boost::asio::dispatch(
@@ -95,6 +96,7 @@ void server::handler_accept_completed(boost::system::error_code error, std::shar
                         , strand_log_
                         , ioc_
                         , socket
+                        , remote_port_
                         , session_id_++
                         , verbose_
                         )
@@ -103,16 +105,16 @@ void server::handler_accept_completed(boost::system::error_code error, std::shar
         else
         {
             session_local_proxy::create(
-                        ioc_log_
-                        , strand_log_
-                        , ioc_
-                        , socket
-                        , session_id_++
-                        , remote_ipv4_
-                        , remote_port_
-                        , verbose_
-                        )
-                    ->start();
+                ioc_log_
+                , strand_log_
+                , ioc_
+                , socket
+                , session_id_++
+                , remote_ipv4_
+                , remote_port_
+                , local_port_
+                , verbose_
+            )->start();
         }
     }
 
