@@ -63,10 +63,6 @@ session_local_proxy::session_local_proxy(
     , dealline_establish_second_(12)
     , deadline_inside_wallside_second_(20)
     , strand_(boost::asio::make_strand(ioc))
-    , strand_inside_read_(boost::asio::make_strand(ioc))
-    , strand_inside_write_(boost::asio::make_strand(ioc))
-    , strand_wallside_read_(boost::asio::make_strand(ioc))
-    , strand_wallside_write_(boost::asio::make_strand(ioc))
 {
     write_log(ioc_log_, strand_log_, log_level_info, verbose_, session_id_, "created");
 }
@@ -753,6 +749,8 @@ void session_local_proxy::handler_write_response_completed(
     socket_wallside_->shutdown(boost::asio::socket_base::shutdown_both, ec);
 }
 
+/////////////////////////////////////////////////////
+
 void session_local_proxy::do_read_inside()
 {
     {
@@ -767,7 +765,7 @@ void session_local_proxy::do_read_inside()
     std::shared_ptr<std::vector<char>> buf(new std::vector<char>(40960, 0));
     socket_inside_->async_read_some(
                 boost::asio::buffer(*buf)
-                , boost::asio::bind_executor(strand_inside_read_, boost::bind(&session_local_proxy::handler_do_read_inside_completed, shared_from_this(), buf, boost::placeholders::_1, boost::placeholders::_2))
+                , boost::bind(&session_local_proxy::handler_do_read_inside_completed, shared_from_this(), buf, boost::placeholders::_1, boost::placeholders::_2)
                 );
 }
 
@@ -786,14 +784,11 @@ void session_local_proxy::handler_do_read_inside_completed(
 	what << " --> " << std::to_string(bytes_transferred) << " bytes";
 	write_log(ioc_log_, strand_log_, log_level_info, verbose_, session_id_, what.str());
 
-    auto buf_write = std::make_shared<std::vector<char>>(buf->begin(), buf->begin() + bytes_transferred);
-
-    std::shared_ptr<std::vector<char>> buf_write_encode(new std::vector<char>(buf_write->size()));
+    std::shared_ptr<std::vector<char>> buf_write(new std::vector<char>(buf->begin(), buf->begin() + bytes_transferred));
+    std::shared_ptr<std::vector<char>> buf_write_encode(new std::vector<char>(buf_write->size(), 0));
     encode(buf_write->begin(), buf_write->end(), buf_write_encode->begin());
 
     do_write_wallside(buf_write_encode);
-
-    do_read_inside();
 }
 
 void session_local_proxy::do_write_wallside(
@@ -811,9 +806,11 @@ void session_local_proxy::do_write_wallside(
 
     std::shared_ptr<std::vector<char>> buf_write(new std::vector<char>(*buf));
 
-    socket_wallside_->async_write_some(
-                boost::asio::buffer(*buf_write)
-                , boost::asio::bind_executor(strand_wallside_write_, boost::bind(&session_local_proxy::handler_do_write_wallside_completed, shared_from_this(), buf_write, boost::placeholders::_1, boost::placeholders::_2))
+    boost::asio::async_write(
+                *socket_wallside_
+                , boost::asio::buffer(*buf_write)
+                , boost::asio::transfer_at_least(buf_write->size())
+                , boost::bind(&session_local_proxy::handler_do_write_wallside_completed, shared_from_this(), buf_write, boost::placeholders::_1, boost::placeholders::_2)
                 );
 }
 
@@ -828,11 +825,7 @@ void session_local_proxy::handler_do_write_wallside_completed(
         return;
     }
 
-    if(bytes_transferred < buf->size())
-    {
-        auto buf_write = std::make_shared<std::vector<char>>(buf->begin() + bytes_transferred, buf->end());
-        do_write_wallside(buf_write);
-    }
+    do_read_inside();
 }
 
 void session_local_proxy::do_read_wallside()
@@ -849,7 +842,7 @@ void session_local_proxy::do_read_wallside()
     std::shared_ptr<std::vector<char>> buf(new std::vector<char>(40960, 0));
     socket_wallside_->async_read_some(
                 boost::asio::buffer(*buf)
-                , boost::asio::bind_executor(strand_wallside_read_, boost::bind(&session_local_proxy::handler_do_read_wallside_completed, shared_from_this(), buf, boost::placeholders::_1, boost::placeholders::_2))
+                , boost::bind(&session_local_proxy::handler_do_read_wallside_completed, shared_from_this(), buf, boost::placeholders::_1, boost::placeholders::_2)
                 );
 }
 
@@ -868,14 +861,11 @@ void session_local_proxy::handler_do_read_wallside_completed(
 	what << " <-- " << std::to_string(bytes_transferred) << " bytes";
 	write_log(ioc_log_, strand_log_, log_level_info, verbose_, session_id_, what.str());
 
-    auto buf_write = std::make_shared<std::vector<char>>(buf->begin(), buf->begin() + bytes_transferred);
-
+    std::shared_ptr<std::vector<char>> buf_write(new std::vector<char>(buf->begin(), buf->begin() + bytes_transferred));
     std::shared_ptr<std::vector<char>> buf_write_decode(new std::vector<char>(buf_write->size()));
     decode(buf_write->begin(), buf_write->end(), buf_write_decode->begin());
 
     do_write_inside(buf_write_decode);
-
-    do_read_wallside();
 }
 
 void session_local_proxy::do_write_inside(
@@ -893,9 +883,11 @@ void session_local_proxy::do_write_inside(
 
     std::shared_ptr<std::vector<char>> buf_write(new std::vector<char>(*buf));
 
-    socket_inside_->async_write_some(
-                boost::asio::buffer(*buf_write)
-                , boost::asio::bind_executor(strand_inside_write_, boost::bind(&session_local_proxy::handler_do_write_inside_completed, shared_from_this(), buf_write, boost::placeholders::_1, boost::placeholders::_2))
+    boost::asio::async_write(
+                *socket_inside_
+                , boost::asio::buffer(*buf_write)
+                , boost::asio::transfer_at_least(buf_write->size())
+                , boost::bind(&session_local_proxy::handler_do_write_inside_completed, shared_from_this(), buf_write, boost::placeholders::_1, boost::placeholders::_2)
                 );
 }
 
@@ -914,10 +906,5 @@ void session_local_proxy::handler_do_write_inside_completed(
         return;
     }
 
-    if(bytes_transferred < buf->size())
-    {
-
-        auto buf_write = std::make_shared<std::vector<char>>(buf->begin() + bytes_transferred, buf->end());
-        do_write_inside(buf_write);
-    }
+    do_read_wallside();
 }

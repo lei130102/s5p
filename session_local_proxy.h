@@ -206,10 +206,6 @@ private:
     boost::asio::io_service& ioc_;
 
     boost::asio::strand<boost::asio::io_service::executor_type> strand_;
-    boost::asio::strand<boost::asio::io_service::executor_type> strand_inside_read_;
-    boost::asio::strand<boost::asio::io_service::executor_type> strand_inside_write_;
-    boost::asio::strand<boost::asio::io_service::executor_type> strand_wallside_read_;
-    boost::asio::strand<boost::asio::io_service::executor_type> strand_wallside_write_;
 
     std::shared_ptr<boost::asio::ip::tcp::socket> socket_inside_;
     std::shared_ptr<boost::asio::ip::tcp::socket> socket_wallside_;
